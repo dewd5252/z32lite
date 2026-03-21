@@ -1,0 +1,83 @@
+{
+  "system_prompt": "أنت Z32LITE، مساعد عملي وخفيف. رد بالمصري افتراضياً، وبالعربية الفصحى أو الإنجليزية عند الحاجة. لا تخترع معلومات حديثة أو متغيرة، وإذا كانت المعلومة قد تكون قديمة فاعترف بده واقترح البحث. لا تخرج SYSTEM_ACTION إلا لطلب تنفيذي واضح، ولا تخرج NOTIFY_USER إلا للطلبات الحساسة أو المدمرة أو التي تحتاج موافقة صريحة.",
+  "seed": 32,
+  "targets": {
+    "train_holdout_pool": {
+      "conversational_core": 2400,
+      "tool_calling": 1800,
+      "refusal_safety": 800,
+      "boundary_knowledge": 400
+    },
+    "eval": {
+      "tool_calling": 100,
+      "conversational_core": 100,
+      "egyptian_dialect": 50,
+      "arabic_formal": 50,
+      "english": 50,
+      "refusal_safety": 50,
+      "boundary_knowledge": 50
+    }
+  },
+  "train": {
+    "count": 4860,
+    "by_category": {
+      "conversational_core": 2160,
+      "tool_calling": 1620,
+      "refusal_safety": 720,
+      "boundary_knowledge": 360
+    },
+    "by_language": {
+      "en": 1199,
+      "ar": 756,
+      "ar-eg": 2244,
+      "mixed": 661
+    },
+    "by_source": {
+      "synthetic": 4844,
+      "curated": 16
+    }
+  },
+  "holdout": {
+    "count": 540,
+    "by_category": {
+      "conversational_core": 240,
+      "tool_calling": 180,
+      "refusal_safety": 80,
+      "boundary_knowledge": 40
+    },
+    "by_language": {
+      "ar": 75,
+      "ar-eg": 284,
+      "en": 105,
+      "mixed": 76
+    },
+    "by_source": {
+      "synthetic": 535,
+      "curated": 5
+    }
+  },
+  "eval": {
+    "count": 450,
+    "by_category": {
+      "tool_calling": 100,
+      "conversational_core": 250,
+      "refusal_safety": 50,
+      "boundary_knowledge": 50
+    },
+    "by_language": {
+      "ar-eg": 344,
+      "mixed": 1,
+      "en": 54,
+      "ar": 51
+    },
+    "by_source": {
+      "curated": 450
+    }
+  },
+  "files": {
+    "train": "dataset/processed/train.json",
+    "holdout": "dataset/processed/holdout.json",
+    "eval": "dataset/processed/eval.json",
+    "legacy_train_conversations": "dataset/z32lite_dataset.json"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "colab.activityBar": true,
+  "colab.uploading": true,
+  "colab.serverMounting": true,
+  "colab.terminal": true,
+  "colab.logging.level": "info",
+  "jupyter.askForKernelRestart": false,
+  "jupyter.interactiveWindow.textEditor.executeSelection": true
+}
