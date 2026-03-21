@@ -11,6 +11,9 @@ PROFILE="${1:-balanced}"
 OUTPUT_ROOT="${2:-/content/z32lite_runs}"
 TRAIN_FILE="${3:-dataset/processed/qwen_jsonl/train.jsonl}"
 EVAL_FILE="${4:-dataset/processed/qwen_jsonl/holdout.jsonl}"
+mkdir -p "${OUTPUT_ROOT}"
+RUN_LOG="${OUTPUT_ROOT}/pipeline.log"
+exec > >(tee -a "${RUN_LOG}") 2>&1
 
 if [[ ! -d "/content" ]]; then
   echo "This script must run on Google Colab runtime."
@@ -18,6 +21,20 @@ if [[ ! -d "/content" ]]; then
   echo "Open the notebook with Colab kernel, then run all cells again."
   exit 2
 fi
+
+echo "Log file: ${RUN_LOG}"
+python3 - <<'PY'
+import os
+try:
+    import torch
+    print("torch:", torch.__version__)
+    print("cuda_available:", torch.cuda.is_available())
+    if torch.cuda.is_available():
+        print("gpu_name:", torch.cuda.get_device_name(0))
+except Exception as exc:
+    print("torch check failed:", exc)
+print("COLAB_RELEASE_TAG:", os.environ.get("COLAB_RELEASE_TAG"))
+PY
 
 echo "[1/6] Installing training dependencies"
 pip install -q -r finetune/requirements-colab.txt
@@ -32,15 +49,30 @@ echo "[4/6] Exporting Qwen JSONL"
 python3 dataset/export_qwen_jsonl.py
 
 echo "[5/6] Training profile=${PROFILE}"
-python3 finetune/train_qlora.py \
+TRAINED_PROFILE="${PROFILE}"
+if ! python3 finetune/train_qlora.py \
   --train-file "${TRAIN_FILE}" \
   --eval-file "${EVAL_FILE}" \
   --profile "${PROFILE}" \
-  --output-root "${OUTPUT_ROOT}"
+  --output-root "${OUTPUT_ROOT}"; then
+  if [[ "${PROFILE}" != "colab_safe" ]]; then
+    echo "Primary profile failed. Retrying once with profile=colab_safe ..."
+    TRAINED_PROFILE="colab_safe"
+    python3 finetune/train_qlora.py \
+      --train-file "${TRAIN_FILE}" \
+      --eval-file "${EVAL_FILE}" \
+      --profile "${TRAINED_PROFILE}" \
+      --max-seq-length 1024 \
+      --save-steps 200 \
+      --output-root "${OUTPUT_ROOT}"
+  else
+    exit 1
+  fi
+fi
 
 echo "[6/6] Exporting GGUF"
 python3 finetune/export_gguf.py \
-  --model-dir "${OUTPUT_ROOT}/${PROFILE}/final_merged" \
+  --model-dir "${OUTPUT_ROOT}/${TRAINED_PROFILE}/final_merged" \
   --output-dir "${OUTPUT_ROOT}/gguf"
 
 echo "Pipeline complete."

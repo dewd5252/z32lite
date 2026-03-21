@@ -63,6 +63,7 @@ python dataset/score_outputs.py --predictions predictions.jsonl
 - `balanced`
 - `tool_heavy`
 - `light_regularization`
+- `colab_safe` (fallback أخف تلقائيًا في حال فشل profile أساسي)
 
 ## ملاحظات
 - لا يوجد local training path في هذه الخطة.

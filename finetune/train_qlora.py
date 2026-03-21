@@ -33,6 +33,14 @@ PROFILES = {
         "lora_dropout": 0.02,
         "gradient_accumulation_steps": 8,
     },
+    "colab_safe": {
+        "learning_rate": 2e-4,
+        "num_train_epochs": 1,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "lora_dropout": 0.05,
+        "gradient_accumulation_steps": 4,
+    },
 }
 
 
@@ -56,6 +64,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--logging-steps", type=int, default=10)
     parser.add_argument("--save-steps", type=int, default=100)
     parser.add_argument("--warmup-ratio", type=float, default=0.03)
+    parser.add_argument(
+        "--allow-cpu",
+        action="store_true",
+        help="Allow CPU fallback (slow). By default training requires CUDA.",
+    )
     return parser.parse_args()
 
 
@@ -65,8 +78,11 @@ def main() -> int:
     run_dir = Path(args.output_root) / args.profile
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
     from datasets import load_dataset
     from peft import LoraConfig
+    import torch
     from transformers import (
         AutoModelForCausalLM,
         AutoTokenizer,
@@ -75,6 +91,12 @@ def main() -> int:
     )
     from trl import SFTTrainer
 
+    if not torch.cuda.is_available() and not args.allow_cpu:
+        raise RuntimeError(
+            "CUDA is not available. Connect to a GPU runtime in Colab, "
+            "or pass --allow-cpu (not recommended due very slow training)."
+        )
+
     train_dataset = load_dataset("json", data_files=args.train_file, split="train")
     eval_dataset = load_dataset("json", data_files=args.eval_file, split="train")
 
@@ -82,10 +104,15 @@ def main() -> int:
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
         bnb_4bit_use_double_quant=True,
-        bnb_4bit_compute_dtype="float16",
+        bnb_4bit_compute_dtype=torch.float16,
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_id, use_fast=True)
+    hf_token = os.environ.get("HF_TOKEN")
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.model_id,
+        use_fast=True,
+        token=hf_token,
+    )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -94,8 +121,11 @@ def main() -> int:
         quantization_config=quant_config,
         device_map="auto",
         trust_remote_code=True,
+        token=hf_token,
+        low_cpu_mem_usage=True,
     )
     model.config.use_cache = False
+    model.gradient_checkpointing_enable()
 
     peft_config = LoraConfig(
         r=profile["lora_r"],
@@ -122,6 +152,8 @@ def main() -> int:
         fp16=True,
         report_to="none",
         lr_scheduler_type="cosine",
+        optim="paged_adamw_8bit",
+        gradient_checkpointing=True,
         save_total_limit=2,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
