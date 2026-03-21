@@ -75,9 +75,24 @@ import shutil
 import subprocess
 from pathlib import Path
 
-def run(cmd, cwd=None):
+def _tail_log(path: Path, n: int = 200):
+    if not path.exists():
+        print(f"[debug] log file not found: {path}")
+        return
+    print(f"\\n--- last {n} lines of {path} ---")
+    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    for line in lines[-n:]:
+        print(line)
+    print("--- end log ---\\n")
+
+def run(cmd, cwd=None, debug_log: Path | None = None):
     print("$", cmd)
-    subprocess.run(cmd, shell=True, check=True, cwd=cwd)
+    result = subprocess.run(cmd, shell=True, cwd=cwd)
+    if result.returncode != 0:
+        print(f"[error] command failed with code={result.returncode}")
+        if debug_log is not None:
+            _tail_log(debug_log, n=220)
+        raise RuntimeError(f"Command failed: {cmd}")
 
 repo_path = Path(REPO_DIR)
 if not repo_path.exists():
@@ -100,7 +115,10 @@ os.chdir(REPO_DIR)
         make_code_cell(
             """
 run("chmod +x finetune/colab_oneclick.sh")
-run(f"bash ./finetune/colab_oneclick.sh {PROFILE} {OUTPUT_ROOT}")
+run(
+    f"bash ./finetune/colab_oneclick.sh {PROFILE} {OUTPUT_ROOT}",
+    debug_log=Path(f"{OUTPUT_ROOT}/pipeline.log"),
+)
             """
         ),
         make_code_cell(
