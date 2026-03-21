@@ -47,9 +47,6 @@ Notebook ده بيشغّل كامل مسار:
             """
 # ---- config ----
 REPO_URL = "https://github.com/dewd5252/z32lite.git"
-# لو الريبو Private حط PAT هنا بصلاحية repo
-# مثال: GITHUB_TOKEN = "ghp_xxx"
-GITHUB_TOKEN = ""
 REPO_DIR = "/content/z32lite"
 PROFILE = "balanced"  # balanced | tool_heavy | light_regularization
 OUTPUT_ROOT = "/content/z32lite_runs"
@@ -58,6 +55,7 @@ OUTPUT_ROOT = "/content/z32lite_runs"
         make_code_cell(
             """
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -65,22 +63,22 @@ def run(cmd, cwd=None):
     print("$", cmd)
     subprocess.run(cmd, shell=True, check=True, cwd=cwd)
 
-def with_token(url: str, token: str) -> str:
-    if not token.strip():
-        return url
-    if "https://github.com/" in url:
-        return url.replace("https://", f"https://{token}@")
-    return url
-
-clone_url = with_token(REPO_URL, GITHUB_TOKEN)
-
-if not Path(REPO_DIR).exists():
-    run(f"git clone {clone_url} {REPO_DIR}")
+repo_path = Path(REPO_DIR)
+if not repo_path.exists():
+    run(f"git clone {REPO_URL} {REPO_DIR}")
 else:
-    print("Repo already exists, skipping clone.")
+    # لو المجلد موجود لكن مش git repo صحيح، نحذفه ونعيد clone تلقائياً
+    if not (repo_path / ".git").exists():
+        print("Existing folder is not a git repo. Re-cloning...")
+        shutil.rmtree(repo_path)
+        run(f"git clone {REPO_URL} {REPO_DIR}")
+    else:
+        print("Repo already exists, pulling latest...")
+        os.chdir(REPO_DIR)
+        run("git fetch --all")
+        run("git reset --hard origin/main")
 
 os.chdir(REPO_DIR)
-run("git pull --ff-only || true")
             """
         ),
         make_code_cell(

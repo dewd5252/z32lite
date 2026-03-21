@@ -42,7 +42,6 @@ python finetune/train_qlora.py \
 
 بديل بدون كتابة أوامر يدوية:
 - افتح `finetune/z32lite_colab_oneclick.ipynb`
-- عدّل قيمة `REPO_URL` مرة واحدة
 - شغّل `Runtime > Run all`
 
 ## 5. صدّر إلى GGUF
