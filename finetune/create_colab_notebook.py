@@ -46,7 +46,10 @@ Notebook ده بيشغّل كامل مسار:
         make_code_cell(
             """
 # ---- config ----
-REPO_URL = "https://github.com/<YOUR_USER>/<YOUR_REPO>.git"
+REPO_URL = "https://github.com/dewd5252/z32lite.git"
+# لو الريبو Private حط PAT هنا بصلاحية repo
+# مثال: GITHUB_TOKEN = "ghp_xxx"
+GITHUB_TOKEN = ""
 REPO_DIR = "/content/z32lite"
 PROFILE = "balanced"  # balanced | tool_heavy | light_regularization
 OUTPUT_ROOT = "/content/z32lite_runs"
@@ -62,8 +65,17 @@ def run(cmd, cwd=None):
     print("$", cmd)
     subprocess.run(cmd, shell=True, check=True, cwd=cwd)
 
+def with_token(url: str, token: str) -> str:
+    if not token.strip():
+        return url
+    if "https://github.com/" in url:
+        return url.replace("https://", f"https://{token}@")
+    return url
+
+clone_url = with_token(REPO_URL, GITHUB_TOKEN)
+
 if not Path(REPO_DIR).exists():
-    run(f"git clone {REPO_URL} {REPO_DIR}")
+    run(f"git clone {clone_url} {REPO_DIR}")
 else:
     print("Repo already exists, skipping clone.")
 
