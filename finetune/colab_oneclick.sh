@@ -13,6 +13,7 @@ TRAIN_FILE="${3:-dataset/processed/qwen_jsonl/train.jsonl}"
 EVAL_FILE="${4:-dataset/processed/qwen_jsonl/holdout.jsonl}"
 mkdir -p "${OUTPUT_ROOT}"
 RUN_LOG="${OUTPUT_ROOT}/pipeline.log"
+STATUS_JSON="${OUTPUT_ROOT}/pipeline_status.json"
 exec > >(tee -a "${RUN_LOG}") 2>&1
 
 if [[ ! -d "/content" ]]; then
@@ -35,6 +36,21 @@ except Exception as exc:
     print("torch check failed:", exc)
 print("COLAB_RELEASE_TAG:", os.environ.get("COLAB_RELEASE_TAG"))
 PY
+
+if ! python3 - <<'PY'
+import torch
+raise SystemExit(0 if torch.cuda.is_available() else 1)
+PY
+then
+  cat <<'EOF'
+[fatal] GPU runtime is not attached.
+Fix in Colab web:
+1) Runtime -> Change runtime type
+2) Hardware accelerator -> GPU
+3) Save, then Runtime -> Restart and run all
+EOF
+  exit 1
+fi
 
 echo "[1/6] Installing training dependencies"
 pip install -q -r finetune/requirements-colab.txt
@@ -75,7 +91,27 @@ python3 finetune/export_gguf.py \
   --model-dir "${OUTPUT_ROOT}/${TRAINED_PROFILE}/final_merged" \
   --output-dir "${OUTPUT_ROOT}/gguf"
 
+python3 - <<PY
+import json
+from pathlib import Path
+
+status = {
+    "requested_profile": "${PROFILE}",
+    "trained_profile": "${TRAINED_PROFILE}",
+    "output_root": "${OUTPUT_ROOT}",
+    "merged_model_dir": f"${OUTPUT_ROOT}/${TRAINED_PROFILE}/final_merged",
+    "gguf_fp16": f"${OUTPUT_ROOT}/gguf/z32lite_f16.gguf",
+    "gguf_q4": f"${OUTPUT_ROOT}/gguf/z32lite_Q4_K_M.gguf",
+}
+Path("${STATUS_JSON}").write_text(
+    json.dumps(status, ensure_ascii=False, indent=2),
+    encoding="utf-8",
+)
+print(f"✅ wrote status file: ${STATUS_JSON}")
+PY
+
 echo "Pipeline complete."
+echo "Trained profile: ${TRAINED_PROFILE}"
 echo "GGUF outputs:"
 echo "  ${OUTPUT_ROOT}/gguf/z32lite_f16.gguf"
 echo "  ${OUTPUT_ROOT}/gguf/z32lite_Q4_K_M.gguf"

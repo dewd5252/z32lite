@@ -56,6 +56,7 @@ OUTPUT_ROOT = "/content/z32lite_runs"
             """
 import os
 import sys
+import subprocess
 
 print("Python:", sys.version)
 print("Has /content:", os.path.exists("/content"))
@@ -65,6 +66,24 @@ if not os.path.exists("/content"):
     raise RuntimeError(
         "Not running on Colab runtime. "
         "In VS Code choose: Select Kernel > Colab > Auto Connect, then Run All again."
+    )
+
+try:
+    import torch
+    cuda_ok = torch.cuda.is_available()
+    print("cuda_available:", cuda_ok)
+    if cuda_ok:
+        print("gpu_name:", torch.cuda.get_device_name(0))
+except Exception:
+    cuda_ok = False
+    print("cuda_available: False (torch unavailable)")
+
+if not cuda_ok:
+    # fall back to nvidia-smi visibility for a clearer hint in Colab UI
+    smi = subprocess.run("nvidia-smi -L", shell=True, capture_output=True, text=True)
+    print("nvidia-smi:", smi.stdout.strip() or smi.stderr.strip() or "not available")
+    raise RuntimeError(
+        "GPU runtime is not attached. In Colab Web: Runtime > Change runtime type > GPU, then reconnect."
     )
             """
         ),
@@ -124,9 +143,20 @@ run(
         make_code_cell(
             """
 print("Artifacts:")
-print(f"- merged model: {OUTPUT_ROOT}/{PROFILE}/final_merged")
-print(f"- fp16 gguf:    {OUTPUT_ROOT}/gguf/z32lite_f16.gguf")
-print(f"- q4 gguf:      {OUTPUT_ROOT}/gguf/z32lite_Q4_K_M.gguf")
+from pathlib import Path
+status_file = Path(f"{OUTPUT_ROOT}/pipeline_status.json")
+if status_file.exists():
+    import json
+    status = json.loads(status_file.read_text(encoding="utf-8"))
+    print(f"- requested profile: {status['requested_profile']}")
+    print(f"- trained profile:   {status['trained_profile']}")
+    print(f"- merged model:      {status['merged_model_dir']}")
+    print(f"- fp16 gguf:         {status['gguf_fp16']}")
+    print(f"- q4 gguf:           {status['gguf_q4']}")
+else:
+    print(f"- merged model: {OUTPUT_ROOT}/{PROFILE}/final_merged")
+    print(f"- fp16 gguf:    {OUTPUT_ROOT}/gguf/z32lite_f16.gguf")
+    print(f"- q4 gguf:      {OUTPUT_ROOT}/gguf/z32lite_Q4_K_M.gguf")
             """
         ),
     ]
