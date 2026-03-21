@@ -55,6 +55,22 @@ OUTPUT_ROOT = "/content/z32lite_runs"
         make_code_cell(
             """
 import os
+import sys
+
+print("Python:", sys.version)
+print("Has /content:", os.path.exists("/content"))
+print("COLAB_RELEASE_TAG:", os.environ.get("COLAB_RELEASE_TAG"))
+
+if not os.path.exists("/content"):
+    raise RuntimeError(
+        "Not running on Colab runtime. "
+        "In VS Code choose: Select Kernel > Colab > Auto Connect, then Run All again."
+    )
+            """
+        ),
+        make_code_cell(
+            """
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -84,7 +100,7 @@ os.chdir(REPO_DIR)
         make_code_cell(
             """
 run("chmod +x finetune/colab_oneclick.sh")
-run(f"./finetune/colab_oneclick.sh {PROFILE} {OUTPUT_ROOT}")
+run(f"bash ./finetune/colab_oneclick.sh {PROFILE} {OUTPUT_ROOT}")
             """
         ),
         make_code_cell(

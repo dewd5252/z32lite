@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+trap 'echo "ERROR: command failed at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
 # Colab-first one-click pipeline:
 # 1) build/validate/export dataset
@@ -10,6 +11,13 @@ PROFILE="${1:-balanced}"
 OUTPUT_ROOT="${2:-/content/z32lite_runs}"
 TRAIN_FILE="${3:-dataset/processed/qwen_jsonl/train.jsonl}"
 EVAL_FILE="${4:-dataset/processed/qwen_jsonl/holdout.jsonl}"
+
+if [[ ! -d "/content" ]]; then
+  echo "This script must run on Google Colab runtime."
+  echo "Current environment does not have /content."
+  echo "Open the notebook with Colab kernel, then run all cells again."
+  exit 2
+fi
 
 echo "[1/6] Installing training dependencies"
 pip install -q -r finetune/requirements-colab.txt
