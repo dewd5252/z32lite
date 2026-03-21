@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
 from pathlib import Path
@@ -136,29 +137,40 @@ def main() -> int:
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
     )
 
-    training_args = TrainingArguments(
-        output_dir=str(run_dir / "trainer"),
-        learning_rate=profile["learning_rate"],
-        num_train_epochs=profile["num_train_epochs"],
-        per_device_train_batch_size=args.per_device_train_batch_size,
-        per_device_eval_batch_size=args.per_device_eval_batch_size,
-        gradient_accumulation_steps=profile["gradient_accumulation_steps"],
-        evaluation_strategy="steps",
-        eval_steps=args.save_steps,
-        save_steps=args.save_steps,
-        logging_steps=args.logging_steps,
-        warmup_ratio=args.warmup_ratio,
-        bf16=False,
-        fp16=True,
-        report_to="none",
-        lr_scheduler_type="cosine",
-        optim="paged_adamw_8bit",
-        gradient_checkpointing=True,
-        save_total_limit=2,
-        load_best_model_at_end=True,
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
-    )
+    ta_params = set(inspect.signature(TrainingArguments.__init__).parameters.keys())
+    training_kwargs = {
+        "output_dir": str(run_dir / "trainer"),
+        "learning_rate": profile["learning_rate"],
+        "num_train_epochs": profile["num_train_epochs"],
+        "per_device_train_batch_size": args.per_device_train_batch_size,
+        "per_device_eval_batch_size": args.per_device_eval_batch_size,
+        "gradient_accumulation_steps": profile["gradient_accumulation_steps"],
+        "eval_steps": args.save_steps,
+        "save_steps": args.save_steps,
+        "logging_steps": args.logging_steps,
+        "warmup_ratio": args.warmup_ratio,
+        "bf16": False,
+        "fp16": True,
+        "report_to": "none",
+        "lr_scheduler_type": "cosine",
+        "optim": "paged_adamw_8bit",
+        "gradient_checkpointing": True,
+        "save_total_limit": 2,
+        "load_best_model_at_end": True,
+        "metric_for_best_model": "eval_loss",
+        "greater_is_better": False,
+    }
+    if "evaluation_strategy" in ta_params:
+        training_kwargs["evaluation_strategy"] = "steps"
+    elif "eval_strategy" in ta_params:
+        training_kwargs["eval_strategy"] = "steps"
+    else:
+        raise RuntimeError(
+            "Unsupported transformers TrainingArguments signature: "
+            "missing evaluation strategy argument."
+        )
+
+    training_args = TrainingArguments(**training_kwargs)
 
     trainer = SFTTrainer(
         model=model,
