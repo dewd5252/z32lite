@@ -172,17 +172,35 @@ def main() -> int:
 
     training_args = TrainingArguments(**training_kwargs)
 
-    trainer = SFTTrainer(
-        model=model,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        args=training_args,
-        tokenizer=tokenizer,
-        peft_config=peft_config,
-        dataset_text_field="text",
-        max_seq_length=args.max_seq_length,
-        packing=False,
-    )
+    sft_params = set(inspect.signature(SFTTrainer.__init__).parameters.keys())
+    trainer_kwargs = {
+        "model": model,
+        "train_dataset": train_dataset,
+        "eval_dataset": eval_dataset,
+        "args": training_args,
+        "peft_config": peft_config,
+    }
+
+    if "tokenizer" in sft_params:
+        trainer_kwargs["tokenizer"] = tokenizer
+    elif "processing_class" in sft_params:
+        trainer_kwargs["processing_class"] = tokenizer
+
+    if "dataset_text_field" in sft_params:
+        trainer_kwargs["dataset_text_field"] = "text"
+    elif "formatting_func" in sft_params:
+        trainer_kwargs["formatting_func"] = lambda example: example["text"]
+
+    if "max_seq_length" in sft_params:
+        trainer_kwargs["max_seq_length"] = args.max_seq_length
+    elif "max_length" in sft_params:
+        trainer_kwargs["max_length"] = args.max_seq_length
+
+    if "packing" in sft_params:
+        trainer_kwargs["packing"] = False
+
+    print("SFTTrainer signature compatibility:", sorted(sft_params))
+    trainer = SFTTrainer(**trainer_kwargs)
 
     trainer.train()
     trainer.save_model(str(run_dir / "adapter"))
