@@ -17,6 +17,7 @@ PROFILES = {
         "lora_alpha": 128,
         "lora_dropout": 0.05,
         "gradient_accumulation_steps": 8,
+        "precision": "fp16",
     },
     "tool_heavy": {
         "learning_rate": 1.8e-4,
@@ -25,6 +26,7 @@ PROFILES = {
         "lora_alpha": 128,
         "lora_dropout": 0.05,
         "gradient_accumulation_steps": 8,
+        "precision": "fp16",
     },
     "light_regularization": {
         "learning_rate": 2.2e-4,
@@ -33,6 +35,7 @@ PROFILES = {
         "lora_alpha": 128,
         "lora_dropout": 0.02,
         "gradient_accumulation_steps": 8,
+        "precision": "fp16",
     },
     "colab_safe": {
         "learning_rate": 2e-4,
@@ -41,6 +44,7 @@ PROFILES = {
         "lora_alpha": 64,
         "lora_dropout": 0.05,
         "gradient_accumulation_steps": 4,
+        "precision": "fp16",
     },
 }
 
@@ -66,11 +70,52 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-steps", type=int, default=100)
     parser.add_argument("--warmup-ratio", type=float, default=0.03)
     parser.add_argument(
+        "--precision",
+        choices=["fp16", "bf16", "auto"],
+        default="fp16",
+        help="Precision mode for training. Default is fp16 (best for Colab T4).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Build model + trainer only, skip trainer.train() for compatibility checks.",
+    )
+    parser.add_argument(
         "--allow-cpu",
         action="store_true",
         help="Allow CPU fallback (slow). By default training requires CUDA.",
     )
     return parser.parse_args()
+
+
+def resolve_precision(
+    requested_precision: str,
+    profile: dict[str, float | int | str | bool],
+    *,
+    cuda_available: bool,
+    bf16_supported: bool,
+) -> tuple[str, str, bool, bool, bool]:
+    if "bf16" in profile:
+        print("[warn] Found deprecated profile key 'bf16'. It will be ignored.")
+
+    profile_precision = str(profile.get("precision", "fp16")).lower()
+    if profile_precision not in {"fp16", "bf16", "auto"}:
+        print(f"[warn] Invalid profile precision={profile_precision!r}; falling back to fp16.")
+        profile_precision = "fp16"
+
+    requested = (requested_precision or profile_precision).lower()
+    resolved = requested
+
+    if requested == "auto":
+        resolved = "bf16" if bf16_supported else "fp16"
+    elif requested == "bf16" and not bf16_supported:
+        print("[warn] bf16 requested but unsupported on this GPU. Falling back to fp16.")
+        resolved = "fp16"
+
+    if not cuda_available:
+        return requested, "cpu", False, False, False
+
+    return requested, resolved, resolved == "bf16", resolved == "fp16", bf16_supported
 
 
 def main() -> int:
@@ -92,11 +137,30 @@ def main() -> int:
     )
     from trl import SFTTrainer
 
-    if not torch.cuda.is_available() and not args.allow_cpu:
+    cuda_available = torch.cuda.is_available()
+    if not cuda_available and not args.allow_cpu:
         raise RuntimeError(
             "CUDA is not available. Connect to a GPU runtime in Colab, "
             "or pass --allow-cpu (not recommended due very slow training)."
         )
+    cuda_name = torch.cuda.get_device_name(0) if cuda_available else "cpu"
+    bf16_supported = bool(cuda_available and torch.cuda.is_bf16_supported())
+    requested_precision, resolved_precision, use_bf16, use_fp16, bf16_supported = resolve_precision(
+        args.precision,
+        profile,
+        cuda_available=cuda_available,
+        bf16_supported=bf16_supported,
+    )
+
+    print(
+        "precision:",
+        {
+            "requested_precision": requested_precision,
+            "resolved_precision": resolved_precision,
+            "cuda_name": cuda_name,
+            "bf16_supported": bf16_supported,
+        },
+    )
 
     train_dataset = load_dataset("json", data_files=args.train_file, split="train")
     eval_dataset = load_dataset("json", data_files=args.eval_file, split="train")
@@ -149,8 +213,8 @@ def main() -> int:
         "save_steps": args.save_steps,
         "logging_steps": args.logging_steps,
         "warmup_ratio": args.warmup_ratio,
-        "bf16": False,
-        "fp16": True,
+        "bf16": use_bf16,
+        "fp16": use_fp16,
         "report_to": "none",
         "lr_scheduler_type": "cosine",
         "optim": "paged_adamw_8bit",
@@ -202,6 +266,28 @@ def main() -> int:
     print("SFTTrainer signature compatibility:", sorted(sft_params))
     trainer = SFTTrainer(**trainer_kwargs)
 
+    summary = {
+        "model_id": args.model_id,
+        "profile": args.profile,
+        "train_file": args.train_file,
+        "eval_file": args.eval_file,
+        "output_root": str(run_dir),
+        "profile_config": profile,
+        "requested_precision": requested_precision,
+        "resolved_precision": resolved_precision,
+        "cuda_name": cuda_name,
+        "bf16_supported": bf16_supported,
+        "dry_run": bool(args.dry_run),
+    }
+
+    if args.dry_run:
+        (run_dir / "run_summary.json").write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"✅ dry-run passed: {run_dir}")
+        return 0
+
     trainer.train()
     trainer.save_model(str(run_dir / "adapter"))
     tokenizer.save_pretrained(str(run_dir / "adapter"))
@@ -212,14 +298,7 @@ def main() -> int:
     merged_model.save_pretrained(str(merged_dir), safe_serialization=True)
     tokenizer.save_pretrained(str(merged_dir))
 
-    summary = {
-        "model_id": args.model_id,
-        "profile": args.profile,
-        "train_file": args.train_file,
-        "eval_file": args.eval_file,
-        "output_root": str(run_dir),
-        "profile_config": profile,
-    }
+    summary["merged_model_dir"] = str(merged_dir)
     (run_dir / "run_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2),
         encoding="utf-8",

@@ -11,9 +11,11 @@ PROFILE="${1:-balanced}"
 OUTPUT_ROOT="${2:-/content/z32lite_runs}"
 TRAIN_FILE="${3:-dataset/processed/qwen_jsonl/train.jsonl}"
 EVAL_FILE="${4:-dataset/processed/qwen_jsonl/holdout.jsonl}"
+REQUESTED_PRECISION="fp16"
 mkdir -p "${OUTPUT_ROOT}"
 RUN_LOG="${OUTPUT_ROOT}/pipeline.log"
 STATUS_JSON="${OUTPUT_ROOT}/pipeline_status.json"
+PREFLIGHT_JSON="${OUTPUT_ROOT}/preflight.json"
 exec > >(tee -a "${RUN_LOG}") 2>&1
 
 if [[ ! -d "/content" ]]; then
@@ -37,39 +39,45 @@ except Exception as exc:
 print("COLAB_RELEASE_TAG:", os.environ.get("COLAB_RELEASE_TAG"))
 PY
 
-if ! python3 - <<'PY'
+echo "[1/8] Installing training dependencies"
+pip install -q -r finetune/requirements-colab.lock.txt
+
+echo "[2/8] Preflight check"
+python3 finetune/preflight_colab.py --output-root "${OUTPUT_ROOT}"
+
+echo "[3/8] Runtime package versions"
+python3 - <<'PY'
+import accelerate
+import datasets
+import peft
 import torch
-raise SystemExit(0 if torch.cuda.is_available() else 1)
+import transformers
+import trl
+
+print("torch:", torch.__version__)
+print("transformers:", transformers.__version__)
+print("trl:", trl.__version__)
+print("peft:", peft.__version__)
+print("datasets:", datasets.__version__)
+print("accelerate:", accelerate.__version__)
 PY
-then
-  cat <<'EOF'
-[fatal] GPU runtime is not attached.
-Fix in Colab web:
-1) Runtime -> Change runtime type
-2) Hardware accelerator -> GPU
-3) Save, then Runtime -> Restart and run all
-EOF
-  exit 1
-fi
 
-echo "[1/6] Installing training dependencies"
-pip install -q -r finetune/requirements-colab.txt
-
-echo "[2/6] Building dataset"
+echo "[4/8] Building dataset"
 python3 dataset/build_dataset.py
 
-echo "[3/6] Validating dataset"
+echo "[5/8] Validating dataset"
 python3 dataset/validate_dataset.py
 
-echo "[4/6] Exporting Qwen JSONL"
+echo "[6/8] Exporting Qwen JSONL"
 python3 dataset/export_qwen_jsonl.py
 
-echo "[5/6] Training profile=${PROFILE}"
+echo "[7/8] Training profile=${PROFILE} precision=${REQUESTED_PRECISION}"
 TRAINED_PROFILE="${PROFILE}"
 if ! python3 finetune/train_qlora.py \
   --train-file "${TRAIN_FILE}" \
   --eval-file "${EVAL_FILE}" \
   --profile "${PROFILE}" \
+  --precision "${REQUESTED_PRECISION}" \
   --output-root "${OUTPUT_ROOT}"; then
   if [[ "${PROFILE}" != "colab_safe" ]]; then
     echo "Primary profile failed. Retrying once with profile=colab_safe ..."
@@ -78,6 +86,7 @@ if ! python3 finetune/train_qlora.py \
       --train-file "${TRAIN_FILE}" \
       --eval-file "${EVAL_FILE}" \
       --profile "${TRAINED_PROFILE}" \
+      --precision "${REQUESTED_PRECISION}" \
       --max-seq-length 1024 \
       --save-steps 200 \
       --output-root "${OUTPUT_ROOT}"
@@ -86,7 +95,7 @@ if ! python3 finetune/train_qlora.py \
   fi
 fi
 
-echo "[6/6] Exporting GGUF"
+echo "[8/8] Exporting GGUF"
 python3 finetune/export_gguf.py \
   --model-dir "${OUTPUT_ROOT}/${TRAINED_PROFILE}/final_merged" \
   --output-dir "${OUTPUT_ROOT}/gguf"
@@ -98,11 +107,21 @@ from pathlib import Path
 status = {
     "requested_profile": "${PROFILE}",
     "trained_profile": "${TRAINED_PROFILE}",
+    "requested_precision": "${REQUESTED_PRECISION}",
+    "resolved_precision": "${REQUESTED_PRECISION}",
     "output_root": "${OUTPUT_ROOT}",
+    "preflight_json": "${PREFLIGHT_JSON}",
     "merged_model_dir": f"${OUTPUT_ROOT}/${TRAINED_PROFILE}/final_merged",
     "gguf_fp16": f"${OUTPUT_ROOT}/gguf/z32lite_f16.gguf",
     "gguf_q4": f"${OUTPUT_ROOT}/gguf/z32lite_Q4_K_M.gguf",
 }
+run_summary_path = Path("${OUTPUT_ROOT}") / "${TRAINED_PROFILE}" / "run_summary.json"
+if run_summary_path.exists():
+    run_summary = json.loads(run_summary_path.read_text(encoding="utf-8"))
+    status["resolved_precision"] = run_summary.get("resolved_precision", "${REQUESTED_PRECISION}")
+    status["cuda_name"] = run_summary.get("cuda_name")
+    status["bf16_supported"] = run_summary.get("bf16_supported")
+    status["run_summary"] = str(run_summary_path)
 Path("${STATUS_JSON}").write_text(
     json.dumps(status, ensure_ascii=False, indent=2),
     encoding="utf-8",

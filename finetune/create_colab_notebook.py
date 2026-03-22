@@ -1,4 +1,4 @@
-"""Generate a Colab-ready notebook that runs the full Z32LITE pipeline."""
+"""Generate Colab notebooks for Z32LITE training pipeline."""
 
 from __future__ import annotations
 
@@ -6,7 +6,11 @@ import json
 from pathlib import Path
 
 
-NOTEBOOK_PATH = Path(__file__).resolve().parent / "z32lite_colab_oneclick.ipynb"
+FINETUNE_DIR = Path(__file__).resolve().parent
+NOTEBOOKS = {
+    "z32lite_colab_oneclick.ipynb": "Z32LITE Colab One-Click Pipeline",
+    "z32lite_finetune.ipynb": "Z32LITE Finetune (Unified One-Click Runtime)",
+}
 
 
 def make_code_cell(source: str) -> dict:
@@ -27,11 +31,11 @@ def make_markdown_cell(source: str) -> dict:
     }
 
 
-def build_notebook() -> dict:
+def build_notebook(title: str, notebook_name: str) -> dict:
     cells = [
         make_markdown_cell(
-            """
-# Z32LITE Colab One-Click Pipeline
+            f"""
+# {title}
 
 Notebook ده بيشغّل كامل مسار:
 1. تجهيز الداتا
@@ -40,6 +44,7 @@ Notebook ده بيشغّل كامل مسار:
 4. تدريب QLoRA
 5. تصدير GGUF
 
+الـ runtime الرسمي للتدريب هو **fp16 على T4**.
 شغل `Runtime > Run all`.
             """
         ),
@@ -79,7 +84,6 @@ except Exception:
     print("cuda_available: False (torch unavailable)")
 
 if not cuda_ok:
-    # fall back to nvidia-smi visibility for a clearer hint in Colab UI
     smi = subprocess.run("nvidia-smi -L", shell=True, capture_output=True, text=True)
     print("nvidia-smi:", smi.stdout.strip() or smi.stderr.strip() or "not available")
     raise RuntimeError(
@@ -117,7 +121,6 @@ repo_path = Path(REPO_DIR)
 if not repo_path.exists():
     run(f"git clone {REPO_URL} {REPO_DIR}")
 else:
-    # لو المجلد موجود لكن مش git repo صحيح، نحذفه ونعيد clone تلقائياً
     if not (repo_path / ".git").exists():
         print("Existing folder is not a git repo. Re-cloning...")
         shutil.rmtree(repo_path)
@@ -129,6 +132,7 @@ else:
         run("git reset --hard origin/main")
 
 os.chdir(REPO_DIR)
+print("git_commit:", subprocess.check_output("git rev-parse --short HEAD", shell=True).decode().strip())
             """
         ),
         make_code_cell(
@@ -144,19 +148,36 @@ run(
             """
 print("Artifacts:")
 from pathlib import Path
+import json
+import subprocess
+
+try:
+    print("git_commit:", subprocess.check_output("git rev-parse --short HEAD", shell=True).decode().strip())
+except Exception:
+    pass
+
 status_file = Path(f"{OUTPUT_ROOT}/pipeline_status.json")
 if status_file.exists():
-    import json
     status = json.loads(status_file.read_text(encoding="utf-8"))
-    print(f"- requested profile: {status['requested_profile']}")
-    print(f"- trained profile:   {status['trained_profile']}")
-    print(f"- merged model:      {status['merged_model_dir']}")
-    print(f"- fp16 gguf:         {status['gguf_fp16']}")
-    print(f"- q4 gguf:           {status['gguf_q4']}")
+    print(f"- requested profile:   {status.get('requested_profile')}")
+    print(f"- trained profile:     {status.get('trained_profile')}")
+    print(f"- requested precision: {status.get('requested_precision')}")
+    print(f"- resolved precision:  {status.get('resolved_precision')}")
+    print(f"- cuda name:           {status.get('cuda_name')}")
+    print(f"- bf16 supported:      {status.get('bf16_supported')}")
+    print(f"- preflight json:      {status.get('preflight_json')}")
+    print(f"- merged model:        {status.get('merged_model_dir')}")
+    print(f"- fp16 gguf:           {status.get('gguf_fp16')}")
+    print(f"- q4 gguf:             {status.get('gguf_q4')}")
 else:
     print(f"- merged model: {OUTPUT_ROOT}/{PROFILE}/final_merged")
     print(f"- fp16 gguf:    {OUTPUT_ROOT}/gguf/z32lite_f16.gguf")
     print(f"- q4 gguf:      {OUTPUT_ROOT}/gguf/z32lite_Q4_K_M.gguf")
+
+preflight = Path(f"{OUTPUT_ROOT}/preflight.json")
+if preflight.exists():
+    print("\\nPreflight:")
+    print(preflight.read_text(encoding="utf-8"))
             """
         ),
     ]
@@ -164,7 +185,7 @@ else:
     return {
         "cells": cells,
         "metadata": {
-            "colab": {"name": "z32lite_colab_oneclick.ipynb", "provenance": []},
+            "colab": {"name": notebook_name, "provenance": []},
             "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
             "language_info": {"name": "python"},
         },
@@ -174,9 +195,11 @@ else:
 
 
 def main() -> int:
-    notebook = build_notebook()
-    NOTEBOOK_PATH.write_text(json.dumps(notebook, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"✅ Wrote {NOTEBOOK_PATH}")
+    for notebook_name, title in NOTEBOOKS.items():
+        notebook = build_notebook(title=title, notebook_name=notebook_name)
+        path = FINETUNE_DIR / notebook_name
+        path.write_text(json.dumps(notebook, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"✅ Wrote {path}")
     return 0
 
 
